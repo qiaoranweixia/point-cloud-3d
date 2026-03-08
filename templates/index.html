@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>三维点云智能识别系统</title>
+    <style>
+        :root {
+            --primary: #3498db;
+            --panel-bg: rgba(20, 20, 20, 0.9);
+            --text: #ecf0f1;
+            --text-sub: #bdc3c7;
+            --border: rgba(255, 255, 255, 0.1);
+            --font: 'Microsoft YaHei', sans-serif;
+        }
+
+        [data-theme="light"] {
+            --primary: #2980b9;
+            --panel-bg: rgba(255, 255, 255, 0.95);
+            --text: #2c3e50;
+            --text-sub: #7f8c8d;
+            --border: rgba(0, 0, 0, 0.1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
+        body { font-family: var(--font); background: #000; color: var(--text); height: 100vh; overflow: hidden; }
+
+        #viewer { position: absolute; inset: 0; z-index: 1; }
+
+        /* 悬浮按钮 */
+        .fab {
+            position: fixed; top: 20px; right: 20px; z-index: 20;
+            display: flex; gap: 10px;
+        }
+        .fab-btn {
+            width: 44px; height: 44px; border-radius: 50%;
+            background: var(--panel-bg); border: 1px solid var(--border);
+            color: var(--text); font-size: 1.2rem;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        /* 控制面板 */
+        #panel {
+            width: 320px; height: 100%; position: fixed; right: 0; top: 0;
+            background: var(--panel-bg); backdrop-filter: blur(20px);
+            border-left: 1px solid var(--border); z-index: 10;
+            padding: 20px; overflow-y: auto;
+            transform: translateX(0); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @media (max-width: 768px) {
+            #panel {
+                width: 100%; height: 65vh; top: auto; bottom: 0;
+                border-left: none; border-top: 1px solid var(--border);
+                border-radius: 20px 20px 0 0;
+                transform: translateY(110%);
+            }
+            #panel.active { transform: translateY(0); }
+            .fab { top: 15px; right: 15px; }
+            #mobile-mask {
+                position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+                z-index: 5; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            }
+            #mobile-mask.active { opacity: 1; pointer-events: auto; }
+        }
+
+        /* 组件样式 */
+        h3 { font-size: 1rem; color: var(--text); margin-bottom: 15px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .group { margin-bottom: 20px; }
+        .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 0.9rem; color: var(--text-sub); }
+
+        select, input[type="number"] {
+            background: rgba(128,128,128,0.1); border: 1px solid var(--border);
+            color: var(--text); padding: 5px 8px; border-radius: 6px; width: 90px;
+        }
+
+        .file-list { max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.1); border-radius: 8px; border: 1px solid var(--border); margin-top: 10px;}
+        .file-item { padding: 10px; font-size: 0.85rem; cursor: pointer; border-bottom: 1px solid var(--border); transition: 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+        .file-item:hover { background: rgba(52, 152, 219, 0.1); }
+        .file-item.active { background: rgba(52, 152, 219, 0.2); color: var(--primary); border-left: 3px solid var(--primary); }
+
+        .btn-main {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            background: var(--primary); color: white; font-weight: bold; font-size: 1rem;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3); transition: 0.2s;
+        }
+        .btn-main:active { transform: scale(0.98); }
+
+        /* 上传按钮样式 */
+        .upload-area {
+            display: flex; gap: 10px; margin-bottom: 5px;
+        }
+        .btn-upload {
+            flex: 1; padding: 8px; background: rgba(255,255,255,0.1); border: 1px dashed var(--border);
+            border-radius: 6px; color: var(--text); font-size: 0.9rem; cursor: pointer;
+            text-align: center; transition: 0.2s;
+        }
+        .btn-upload:hover { background: rgba(255,255,255,0.15); border-color: var(--primary); }
+
+        /* 状态提示 */
+        #toast {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+            border-radius: 50px; font-size: 0.9rem; opacity: 0; pointer-events: none; transition: 0.3s; z-index: 100; white-space: nowrap;
+        }
+
+        #loader {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px);
+            z-index: 50; display: none; flex-direction: column; align-items: center; justify-content: center; color: white;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.3);
+            border-top-color: var(--primary); border-radius: 50%; animation: spin 1s infinite linear; margin-bottom: 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="viewer"></div>
+
+    <div class="fab">
+        <div class="fab-btn" onclick="toggleTheme()">🌓</div>
+        <div class="fab-btn" onclick="togglePanel()" id="menu-btn">⚙️</div>
+    </div>
+
+    <div id="mobile-mask" onclick="togglePanel()"></div>
+
+    <div id="panel">
+        <div class="group">
+            <h3>📂 点云文件</h3>
+            <!-- 新增上传区域 -->
+            <div class="upload-area">
+                <label class="btn-upload">
+                    📤 上传文件 (.bin)
+                    <input type="file" id="file-upload" accept=".bin" style="display:none" onchange="uploadFile()">
+                </label>
+                <button class="btn-upload" style="flex: 0 0 40px;" onclick="refreshFiles()">🔄</button>
+            </div>
+
+            <div class="file-list" id="file-list">
+                <div style="padding:10px; text-align:center;">加载中...</div>
+            </div>
+        </div>
+
+        <div class="group">
+            <h3>🧠 智能算法</h3>
+            <div class="row">
+                <span>聚类算法</span>
+                <select id="algorithm" onchange="updateUI()">
+                    <option value="dbscan" selected>DBSCAN (推荐)</option>
+                    <option value="kmeans">K-Means</option>
+                    <option value="gmm">GMM</option>
+                </select>
+            </div>
+
+            <!-- DBSCAN 参数 -->
+            <div id="p-dbscan">
+                <div class="row">
+                    <span>自动参数</span>
+                    <input type="checkbox" id="auto-dbscan" checked onchange="updateUI()">
+                </div>
+                <div id="manual-dbscan" style="display:none">
+                    <div class="row"><span>搜索半径 (米)</span><input type="number" id="eps" value="0.5" step="0.1"></div>
+                    <div class="row"><span>最小点数</span><input type="number" id="min-samples" value="10"></div>
+                </div>
+            </div>
+
+            <!-- K-Means 参数 -->
+            <div id="p-kmeans" style="display:none">
+                <div class="row">
+                    <span>自动 K 值</span>
+                    <input type="checkbox" id="auto-k" checked onchange="updateUI()">
+                </div>
+                <div id="manual-k" style="display:none">
+                    <div class="row"><span>聚类数量</span><input type="number" id="n-clusters" value="5"></div>
+                </div>
+            </div>
+
+             <!-- GMM 参数 -->
+             <div id="p-gmm" style="display:none">
+                <div class="row">
+                    <span>自动组件</span>
+                    <input type="checkbox" id="auto-gmm" checked onchange="updateUI()">
+                </div>
+                <div id="manual-gmm" style="display:none">
+                    <div class="row"><span>组件数量</span><input type="number" id="n-components" value="5"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="group">
+            <h3>👁️ 视图控制</h3>
+            <div class="row"><span>显示原始点云</span><input type="checkbox" id="show-original"></div>
+            <div class="row"><span>显示地面</span><input type="checkbox" id="show-ground" checked></div>
+            <div class="row"><span>显示识别框</span><input type="checkbox" id="show-bbox" checked></div>
+            <div class="row"><span>显示类别标签</span><input type="checkbox" id="show-labels" checked></div>
+        </div>
+
+        <button class="btn-main" onclick="runAnalysis()">
+            <span>🚀 开始智能分析</span>
+        </button>
+    </div>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <div>正在识别场景中的物体...</div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let objects = { original: null, ground: null, clusters: [], bboxes: [], labels: [] };
+        let selectedFile = null;
+
+        function init() {
+            initThree();
+            initTheme();
+            refreshFiles().then(() => {
+                const items = document.querySelectorAll('.file-item');
+                if(items.length > 0) {
+                    items[0].click();
+                    setTimeout(runAnalysis, 500);
+                }
+            });
+            updateUI();
+            animate();
+        }
+
+        function initThree() {
+            const container = document.getElementById('viewer');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.002);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(30, 40, 50);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(10, 20, 10);
+            scene.add(new THREE.AmbientLight(0x404040), light);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            const grid = new THREE.GridHelper(200, 50, 0x444444, 0x222222);
+            scene.add(grid);
+            scene.add(new THREE.AxesHelper(5));
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        async function refreshFiles() {
+            try {
+                const res = await fetch('/list_files');
+                const data = await res.json();
+                const list = document.getElementById('file-list');
+                list.innerHTML = '';
+
+                if(!data.files || data.files.length === 0) {
+                    list.innerHTML = '<div style="padding:10px;text-align:center;color:#666">暂无数据</div>';
+                    return;
+                }
+
+                data.files.forEach(f => {
+                    const div = document.createElement('div');
+                    div.className = 'file-item';
+                    div.textContent = '📄 ' + f;
+                    div.onclick = () => {
+                        selectedFile = f;
+                        document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+                        div.classList.add('active');
+                    };
+                    list.appendChild(div);
+                });
+            } catch(e) { showToast('获取文件失败', true); }
+        }
+
+        // 新增：文件上传函数
+        async function uploadFile() {
+            const input = document.getElementById('file-upload');
+            const file = input.files[0];
+            if(!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            showToast('正在上传...', false);
+
+            try {
+                const res = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    showToast('上传成功');
+                    await refreshFiles();
+                    // 自动选中新上传的文件
+                    const items = document.querySelectorAll('.file-item');
+                    if(items.length > 0) items[0].click();
+                } else {
+                    showToast(data.message, true);
+                }
+            } catch(e) { showToast('上传失败', true); }
+            input.value = '';
+        }
+
+        async function runAnalysis() {
+            if(!selectedFile) return showToast('请先选择一个文件', true);
+
+            document.getElementById('loader').style.display = 'flex';
+            if(window.innerWidth <= 768) togglePanel(false);
+
+            try {
+                const algo = document.getElementById('algorithm').value;
+                const params = {
+                    file: selectedFile,
+                    algorithm: algo,
+                    mobile: window.innerWidth <= 768,
+                    auto_dbscan: document.getElementById('auto-dbscan').checked,
+                    eps: parseFloat(document.getElementById('eps').value),
+                    min_samples: parseInt(document.getElementById('min-samples').value),
+                    auto_k: document.getElementById('auto-k').checked,
+                    n_clusters: parseInt(document.getElementById('n-clusters').value),
+                    auto_gmm: document.getElementById('auto-gmm').checked,
+                    n_components: parseInt(document.getElementById('n-components').value)
+                };
+
+                const res = await fetch('/process', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(params)
+                });
+                const result = await res.json();
+
+                if(result.status === 'success') {
+                    renderResult(result.data);
+                    showToast(`分析完成！发现 ${result.meta.clusters} 个物体`);
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch(e) {
+                showToast(e.message || '处理出错', true);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+            }
+        }
+
+        function renderResult(data) {
+            if(objects.original) scene.remove(objects.original);
+            if(objects.ground) scene.remove(objects.ground);
+            objects.clusters.forEach(o => scene.remove(o));
+            objects.bboxes.forEach(o => scene.remove(o));
+            objects.labels.forEach(o => scene.remove(o));
+            objects = { original:null, ground:null, clusters:[], bboxes:[], labels:[] };
+
+            if(data.ground.length) {
+                const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(data.ground.flat(), 3));
+                objects.ground = new THREE.Points(geo, new THREE.PointsMaterial({size: 0.1, color: 0x3498db}));
+                scene.add(objects.ground);
+            }
+
+            if(data.original && data.original.length) {
+                const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(data.original.flat(), 3));
+                objects.original = new THREE.Points(geo, new THREE.PointsMaterial({size: 0.1, color: 0x666666, opacity:0.3, transparent:true}));
+                scene.add(objects.original);
+            }
+
+            data.clusters.forEach((cluster, i) => {
+                const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(cluster.flat(), 3));
+                const type = data.bboxes[i].type;
+                let color = 0xbdc3c7;
+
+                // 颜色映射：根据后端返回的 type 字段
+                if(type === 'person') color = 0xf1c40f;
+                else if(type === 'car') color = 0xe74c3c;
+                else if(type === 'tree') color = 0x2ecc71;
+                else if(type === 'building') color = 0x3498db;
+
+                const pts = new THREE.Points(geo, new THREE.PointsMaterial({size: 0.2, color: color}));
+                objects.clusters.push(pts);
+                scene.add(pts);
+
+                const min = new THREE.Vector3(...data.bboxes[i].min);
+                const max = new THREE.Vector3(...data.bboxes[i].max);
+                const boxHelper = new THREE.Box3Helper(new THREE.Box3(min, max), color);
+                objects.bboxes.push(boxHelper);
+                scene.add(boxHelper);
+
+                const labelText = data.labels[i];
+                const center = new THREE.Vector3((min.x+max.x)/2, max.y + 0.5, (min.z+max.z)/2);
+                const sprite = createLabel(labelText, color);
+                sprite.position.copy(center);
+                objects.labels.push(sprite);
+                scene.add(sprite);
+            });
+
+            updateVisibility();
+        }
+
+        function createLabel(text, colorHex) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 256; canvas.height = 128;
+
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.beginPath();
+            ctx.roundRect(10, 20, 236, 88, 20);
+            ctx.fill();
+
+            ctx.strokeStyle = '#' + new THREE.Color(colorHex).getHexString();
+            ctx.lineWidth = 5;
+            ctx.stroke();
+
+            ctx.font = 'bold 50px "Microsoft YaHei"';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, 128, 80);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(3, 1.5, 1);
+            return sprite;
+        }
+
+        function updateUI() {
+            const algo = document.getElementById('algorithm').value;
+            document.getElementById('p-kmeans').style.display = algo === 'kmeans' ? 'block' : 'none';
+            document.getElementById('p-dbscan').style.display = algo === 'dbscan' ? 'block' : 'none';
+            document.getElementById('p-gmm').style.display = algo === 'gmm' ? 'block' : 'none';
+
+            document.getElementById('manual-dbscan').style.display = document.getElementById('auto-dbscan').checked ? 'none' : 'block';
+            document.getElementById('manual-k').style.display = document.getElementById('auto-k').checked ? 'none' : 'block';
+            document.getElementById('manual-gmm').style.display = document.getElementById('auto-gmm').checked ? 'none' : 'block';
+
+            updateVisibility();
+        }
+
+        function updateVisibility() {
+            const showOri = document.getElementById('show-original').checked;
+            if(objects.original) objects.original.visible = showOri;
+            if(objects.ground) objects.ground.visible = document.getElementById('show-ground').checked;
+            objects.bboxes.forEach(o => o.visible = document.getElementById('show-bbox').checked);
+            objects.labels.forEach(o => o.visible = document.getElementById('show-labels').checked);
+        }
+
+        function toggleTheme() {
+            const root = document.documentElement;
+            const cur = root.getAttribute('data-theme');
+            const target = cur === 'dark' ? 'light' : 'dark';
+            root.setAttribute('data-theme', target);
+            localStorage.setItem('theme', target);
+
+            const color = target === 'dark' ? 0x000000 : 0xf0f2f5;
+            renderer.setClearColor(color);
+            scene.fog.color.setHex(color);
+        }
+
+        function initTheme() {
+            const saved = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', saved);
+            if(renderer) {
+                const color = saved === 'dark' ? 0x000000 : 0xf0f2f5;
+                renderer.setClearColor(color);
+                scene.fog.color.setHex(color);
+            }
+        }
+
+        function togglePanel(forceState) {
+            const p = document.getElementById('panel');
+            const m = document.getElementById('mobile-mask');
+            const isActive = forceState !== undefined ? forceState : !p.classList.contains('active');
+
+            if(isActive) {
+                p.classList.add('active');
+                m.classList.add('active');
+            } else {
+                p.classList.remove('active');
+                m.classList.remove('active');
+            }
+        }
+
+        function showToast(msg, isError) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.background = isError ? 'rgba(231, 76, 60, 0.9)' : 'rgba(46, 204, 113, 0.9)';
+            t.style.opacity = 1;
+            setTimeout(() => t.style.opacity = 0, 3000);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
