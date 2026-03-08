@@ -21,12 +21,12 @@
 
 ### 方式一：一键启动脚本 (推荐)
 ```bash
-/home/kali/3dpoint
+/home/3dpoint
 ```
 
 ### 方式二：手动启动
 ```bash
-cd /home/kali/point-cloud-3d
+cd /home/point-cloud-3d
 python app.py
 ```
 
